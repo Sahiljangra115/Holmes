@@ -1,0 +1,46 @@
+[tool.poetry]
+name = "y1-provenance"
+version = "0.1.0"
+description = "AI-content provenance and misinformation detector (text + images)"
+authors = ["Owner"]
+readme = "README.md"
+packages = [{ include = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+torch = "*"
+transformers = "*"
+datasets = "*"
+scikit-learn = "*"
+timm = "*"
+onnx = "*"
+onnxruntime = "*"
+fastapi = "*"
+uvicorn = "*"
+mangum = "*"
+pydantic = "*"
+mlflow = "*"
+pillow = "*"
+exifread = "*"
+c2pa = "*"
+requests = "*"
+pandas = "*"
+pyarrow = "*"
+joblib = "*"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+ruff = "*"
+httpx = "*"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
