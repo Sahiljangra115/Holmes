@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Provenance Check</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: "class", theme: { extend: { colors: {
+      ink: "#0a0e14", panel: "#111722", edge: "#1e2733", accent: "#38bdf8" } } } };
+  </script>
+  <style>
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+    .dial { transition: stroke-dashoffset .5s ease-out, stroke .3s ease-out; }
+    .bar { transition: width .4s ease-out; }
+  </style>
+</head>
+<body class="min-h-dvh bg-ink text-slate-200 antialiased">
+  <!-- Disclaimer banner: persistent, the whole point of the project -->
+  <div role="note" class="bg-amber-500/10 border-b border-amber-500/30 text-amber-200 text-sm px-4 py-2 text-center">
+    This is an <strong>estimate, not an oracle</strong>. It reports calibrated confidence, never a fake/real verdict.
+  </div>
+
+  <main class="max-w-5xl mx-auto px-4 py-8 md:py-12">
+    <header class="mb-8">
+      <h1 class="text-2xl md:text-3xl font-semibold text-white tracking-tight">AI-Content Provenance Detector</h1>
+      <p class="text-slate-400 mt-1">Fuses text credibility, image detection, metadata, and watermark signals.</p>
+    </header>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <!-- Input -->
+      <section class="bg-panel border border-edge rounded-2xl p-5" aria-labelledby="in-h">
+        <h2 id="in-h" class="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-4">Input</h2>
+
+        <label for="text" class="block text-sm text-slate-400 mb-1">Text to check</label>
+        <textarea id="text" rows="4" placeholder="Paste a claim or statement"
+          class="w-full rounded-lg bg-ink border border-edge px-3 py-2 text-slate-100 placeholder-slate-500
+                 focus:outline-none focus:ring-2 focus:ring-accent resize-y"></textarea>
+
+        <label for="image" class="block text-sm text-slate-400 mt-4 mb-1">Image (optional)</label>
+        <input id="image" type="file" accept="image/*"
+          class="block w-full text-sm text-slate-400 file:mr-3 file:rounded-lg file:border-0
+                 file:bg-edge file:text-slate-200 file:px-4 file:py-2 file:cursor-pointer hover:file:bg-slate-700" />
+
+        <button id="run" type="button"
+          class="mt-5 w-full min-h-[44px] rounded-lg bg-accent text-ink font-semibold cursor-pointer
+                 hover:bg-sky-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-panel
+                 focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2">
+          <span id="run-label">Analyze</span>
+          <svg id="spin" class="hidden h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" class="opacity-25"/>
+            <path d="M22 12a10 10 0 0 1-10 10" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </section>
+
+      <!-- Result -->
+      <section class="bg-panel border border-edge rounded-2xl p-5" aria-labelledby="out-h" aria-live="polite">
+        <h2 id="out-h" class="text-sm font-semibold text-slate-300 uppercase tracking-wide mb-4">Result</h2>
+
+        <div class="flex items-center gap-5">
+          <svg width="120" height="120" viewBox="0 0 120 120" role="img" aria-label="Authenticity confidence dial">
+            <circle cx="60" cy="60" r="52" fill="none" stroke="#1e2733" stroke-width="12" />
+            <circle id="ring" class="dial" cx="60" cy="60" r="52" fill="none" stroke="#64748b" stroke-width="12"
+              stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="326.7" transform="rotate(-90 60 60)" />
+            <text id="pct" x="60" y="58" text-anchor="middle" class="fill-white" style="font: 700 22px ui-sans-serif" font-variant-numeric="tabular-nums">--</text>
+            <text x="60" y="76" text-anchor="middle" class="fill-slate-400" style="font: 11px ui-sans-serif">authentic</text>
+          </svg>
+          <div>
+            <span id="band" class="inline-block rounded-full px-3 py-1 text-sm font-medium bg-edge text-slate-300">awaiting input</span>
+            <p class="text-xs text-slate-500 mt-2">Higher = more likely authentic. Band is decided by the fusion rule, not a model guess.</p>
+          </div>
+        </div>
+
+        <h3 class="text-xs font-semibold text-slate-400 uppercase mt-6 mb-2">Per-signal breakdown</h3>
+        <ul id="signals" class="space-y-2 text-sm text-slate-400">
+          <li class="text-slate-500">No signals yet.</li>
+        </ul>
+
+        <h3 class="text-xs font-semibold text-slate-400 uppercase mt-6 mb-2">Explanation</h3>
+        <p id="explain" class="text-sm text-slate-300 leading-relaxed">Run an analysis to see a grounded explanation.</p>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const CIRC = 326.7; // 2 * PI * 52
+
+    function fileToBase64(file) {
+      return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result).split(",")[1]);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+    }
+
+    function bandColor(band) {
+      return band === "likely_authentic" ? "#22c55e"
+           : band === "likely_synthetic" ? "#ef4444" : "#eab308";
+    }
+
+    function render(data) {
+      const c = data.confidence ?? 0.5;
+      $("pct").textContent = Math.round(c * 100) + "%";
+      $("ring").style.strokeDashoffset = CIRC * (1 - c);
+      $("ring").style.stroke = bandColor(data.band);
+
+      const badge = $("band");
+      badge.textContent = (data.band || "uncertain").replace(/_/g, " ");
+      badge.style.background = bandColor(data.band) + "22";
+      badge.style.color = bandColor(data.band);
+
+      const sig = $("signals");
+      const b = data.breakdown || {};
+      const keys = Object.keys(b);
+      sig.innerHTML = keys.length ? "" : '<li class="text-slate-500">No signals were available.</li>';
+      for (const k of keys) {
+        const v = Math.round(b[k] * 100);
+        sig.insertAdjacentHTML("beforeend", `
+          <li>
+            <div class="flex justify-between mb-1"><span class="capitalize">${k}</span>
+              <span class="tabular-nums text-slate-300">${v}%</span></div>
+            <div class="h-2 rounded-full bg-ink overflow-hidden">
+              <div class="bar h-full rounded-full" style="width:${v}%;background:${bandColor(data.band)}"></div>
+            </div>
+          </li>`);
+      }
+      $("explain").textContent = data.explanation || "No explanation returned.";
+    }
+
+    async function run() {
+      const btn = $("run");
+      btn.disabled = true; $("spin").classList.remove("hidden"); $("run-label").textContent = "Analyzing";
+      try {
+        const file = $("image").files[0];
+        const payload = { text: $("text").value, image_base64: file ? await fileToBase64(file) : "" };
+        const r = await fetch("/predict/fuse", {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload)
+        });
+        if (!r.ok) throw new Error("request failed: " + r.status);
+        render(await r.json());
+      } catch (e) {
+        $("explain").textContent = "Could not reach the service. " + e.message;
+      } finally {
+        btn.disabled = false; $("spin").classList.add("hidden"); $("run-label").textContent = "Analyze";
+      }
+    }
+    $("run").addEventListener("click", run);
+  </script>
+</body>
+</html>
