@@ -10,14 +10,13 @@ def test_temperature_cools_overconfident_logits():
     rng = np.random.default_rng(0)
     n = 400
     labels = rng.integers(0, 2, n)
-    # Overconfident: large-magnitude logits that are only ~70% correct.
     correct = rng.random(n) < 0.7
     logits = np.zeros((n, 2))
     for i in range(n):
         win = labels[i] if correct[i] else 1 - labels[i]
         logits[i, win] = 6.0
     t = fit_temperature(logits, labels)
-    assert t > 1.0  # cooled toward honesty
+    assert t > 1.0
 
 
 def test_ece_improves_after_calibration():

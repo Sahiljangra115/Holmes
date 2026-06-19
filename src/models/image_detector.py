@@ -31,8 +31,6 @@ def _build_loaders():
             transforms.Resize((CFG.image_size, CFG.image_size)),
             transforms.RandomHorizontalFlip(),
             transforms.RandomResizedCrop(CFG.image_size, scale=(0.8, 1.0)),
-            # JPEG recompress so the model learns generation artifacts, not the
-            # compression of one source.
             transforms.RandomApply([transforms.JPEG(quality=(60, 95))], p=0.5)
             if hasattr(transforms, "JPEG")
             else transforms.Lambda(lambda x: x),
@@ -87,7 +85,6 @@ def _val_auc_fpr(model, val_loader, device) -> tuple[float, float]:
     probs, labels = np.array(probs), np.array(labels)
     auc = roc_auc_score(labels, probs) if len(set(labels)) > 1 else 0.5
     preds = (probs >= 0.5).astype(int)
-    # FPR = real images (label 0) wrongly called AI (pred 1).
     neg = labels == 0
     fpr = float((preds[neg] == 1).mean()) if neg.any() else 0.0
     return float(auc), fpr
@@ -108,7 +105,6 @@ def train():
     with mlflow.start_run(run_name="efficientnet-real-vs-ai"):
         mlflow.log_params({"model": CFG.image_model_name, "lr": CFG.image_lr, "epochs": CFG.image_epochs})
         for epoch in range(CFG.image_epochs):
-            # Freeze the backbone for the first epoch, train the head only.
             for p in model.parameters():
                 p.requires_grad = epoch > 0 or True
             model.train()
@@ -147,7 +143,7 @@ def export_onnx(model, path=None):
 
 
 # --------------------------------------------------------------------------- #
-# Inference (ONNX, no torch needed at serve time).
+# Inference
 # --------------------------------------------------------------------------- #
 _SESSION = None
 

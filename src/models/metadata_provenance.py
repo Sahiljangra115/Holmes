@@ -16,7 +16,6 @@ def _read_c2pa(image_path: str) -> dict[str, Any]:
         manifest = reader.json()
         return {"has_c2pa": True, "manifest": manifest}
     except Exception:
-        # No manifest, library missing, or unsigned. All "unknown", not "fake".
         return {"has_c2pa": False, "manifest": None}
 
 
@@ -42,14 +41,12 @@ def extract_metadata(image_path: str) -> dict[str, Any]:
 
     inconsistencies: list[str] = []
     sw = (exif.get("software") or "").lower()
-    # A cheap heuristic: editing software in EXIF with no camera make is a weak
-    # provenance smell. It is a flag, not a verdict.
     if sw and not exif.get("camera_make"):
         inconsistencies.append("editing software present without camera make")
 
     return {
         "has_c2pa": c2pa_info["has_c2pa"],
-        "signer": None,  # filled from manifest when a real signed asset is present
+        "signer": None,
         "camera_make": exif.get("camera_make"),
         "software": exif.get("software"),
         "inconsistencies": inconsistencies,

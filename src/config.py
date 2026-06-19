@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Repo root is two levels up from this file (src/config.py -> repo root).
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 ARTIFACT_DIR = ROOT / "artifacts"
@@ -29,11 +28,6 @@ class Config:
     text_lr: float = 2e-5
     text_batch_size: int = 16
 
-    # LIAR2 6-way label ids: 0 pants-fire, 1 false, 2 barely-true,
-    # 3 half-true, 4 mostly-true, 5 true.
-    # Documented mapping to binary: the lower half of the truth scale is
-    # "not_credible" (0), the upper half is "credible" (1). This collapse is a
-    # judgement call and is stated in the README so the metric is honest.
     text_num_labels: int = 2
     liar2_to_binary: dict[int, int] = field(
         default_factory=lambda: {0: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 1}
@@ -47,15 +41,11 @@ class Config:
     image_lr: float = 1e-4
     image_batch_size: int = 32
 
-    # Fusion weights. They sum to 1.0 over the AVAILABLE signals only, so an
-    # unavailable signal (for example SynthID on the free tier) cannot move the
-    # score. See fusion.py.
     w_text: float = 0.45
     w_image: float = 0.40
     w_meta: float = 0.10
     w_watermark: float = 0.05
 
-    # Band thresholds on the fused authenticity confidence in [0, 1].
     band_synthetic_below: float = 0.35
     band_authentic_above: float = 0.65
 

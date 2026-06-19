@@ -20,9 +20,7 @@ def test_split_deterministic_and_disjoint(tmp_path):
 
     a = prepare_images.build_manifest(root, out=out)
     b = prepare_images.build_manifest(root, out=out)
-    # Same seed -> identical assignment.
     assert a.sort_values("path")["split"].tolist() == b.sort_values("path")["split"].tolist()
-    # Disjoint splits.
     paths = {s: set(a[a["split"] == s]["path"]) for s in ("train", "val", "test")}
     assert paths["train"].isdisjoint(paths["val"])
     assert paths["train"].isdisjoint(paths["test"])

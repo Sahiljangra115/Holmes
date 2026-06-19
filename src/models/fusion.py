@@ -24,7 +24,6 @@ def _signal(score: float | None, available: bool, source: str) -> dict[str, Any]
 
 
 def text_signal(pred) -> dict[str, Any]:
-    # credible -> authentic. Map calibrated confidence onto the authenticity axis.
     if pred is None:
         return _signal(None, False, "text")
     auth = pred.confidence if pred.label == "credible" else 1.0 - pred.confidence
@@ -40,8 +39,6 @@ def image_signal(pred: dict | None) -> dict[str, Any]:
 def meta_signal(meta: dict | None) -> dict[str, Any]:
     if not meta:
         return _signal(None, False, "metadata")
-    # C2PA present nudges toward authentic, inconsistencies nudge away. Weak by
-    # design: metadata can be stripped or forged, so it is a small nudge only.
     score = 0.5
     if meta.get("has_c2pa"):
         score += 0.3
@@ -51,9 +48,8 @@ def meta_signal(meta: dict | None) -> dict[str, Any]:
 
 def watermark_signal(wm: dict | None) -> dict[str, Any]:
     if not wm or wm.get("status") != "DETECTED":
-        # UNAVAILABLE or absent: no information. Dropped from the average.
         return _signal(None, False, "watermark")
-    return _signal(0.0, True, "watermark")  # a detected synth watermark => synthetic
+    return _signal(0.0, True, "watermark")
 
 
 def fuse(text_sig, image_sig, meta_sig, wm_sig, cfg: Config = CFG) -> dict[str, Any]:  # noqa: F821
@@ -72,7 +68,6 @@ def fuse(text_sig, image_sig, meta_sig, wm_sig, cfg: Config = CFG) -> dict[str, 
         total_w = sum(weights[s["source"]] for s in avail)
         confidence = sum(weights[s["source"]] * s["score"] for s in avail) / total_w
 
-    # Clamp away from hard 0/1.
     confidence = min(0.99, max(0.01, confidence))
 
     if confidence < cfg.band_synthetic_below:

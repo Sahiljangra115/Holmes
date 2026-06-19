@@ -17,10 +17,7 @@ from src.config import CFG
 
 
 # --------------------------------------------------------------------------- #
-# Calibration: raw softmax is usually over-confident. Temperature scaling fits a
-# single scalar T on the validation set that divides the logits before softmax.
-# It does not change the argmax (so accuracy is unchanged) but makes the
-# confidence honest, which is the whole point of this project.
+# Calibration
 # --------------------------------------------------------------------------- #
 def _softmax(logits: np.ndarray) -> np.ndarray:
     z = logits - logits.max(axis=1, keepdims=True)
@@ -56,7 +53,7 @@ def load_temperature() -> float:
 class TextPrediction:
     label: str
     label_id: int
-    confidence: float  # calibrated probability of the chosen class
+    confidence: float
 
 
 # --------------------------------------------------------------------------- #
@@ -143,7 +140,6 @@ def train():
         val_metrics = trainer.evaluate(ds["val"])
         mlflow.log_metrics({k: float(v) for k, v in val_metrics.items() if isinstance(v, (int, float))})
 
-        # Calibrate on val logits.
         val_logits = trainer.predict(ds["val"]).predictions
         val_labels = np.array(ds["val"]["label"])
         temp = fit_temperature(val_logits, val_labels)
@@ -155,7 +151,7 @@ def train():
 
 
 # --------------------------------------------------------------------------- #
-# Inference (lazy-loaded, cached). Used by the API.
+# Inference
 # --------------------------------------------------------------------------- #
 _BUNDLE = None
 

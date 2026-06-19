@@ -1,72 +1,72 @@
-# Y1: AI-Content Provenance & Misinformation Detector
+# Holmes
 
-> Given text and/or an image, the service returns a **calibrated** confidence and a plain-language explanation of whether the content is likely AI-generated or misleading. It is deliberately not a binary fake/real oracle. It fuses four independent signals and tells you honestly how sure it is.
+**AI-content provenance and misinformation detector.** Given text and/or an image, Holmes returns a calibrated confidence and a plain-language explanation of whether the content is likely AI-generated or misleading. It is deliberately not a binary fake/real oracle: it fuses four independent signals and reports how sure it actually is.
 
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-ee4c2c.svg)](https://pytorch.org/)
-[![Transformers](https://img.shields.io/badge/DeBERTa--v3-yellow.svg)](https://huggingface.co/microsoft/deberta-v3-base)
-[![ONNX](https://img.shields.io/badge/ONNX-runtime-005CED.svg)](https://onnxruntime.ai/)
+[![DeBERTa-v3](https://img.shields.io/badge/text-DeBERTa--v3-yellow.svg)](https://huggingface.co/microsoft/deberta-v3-base)
+[![ONNX](https://img.shields.io/badge/inference-ONNX-005CED.svg)](https://onnxruntime.ai/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
 [![AWS Lambda](https://img.shields.io/badge/deploy-AWS%20Lambda-FF9900.svg)](https://aws.amazon.com/lambda/)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF.svg)](https://github.com/features/actions)
 
 ---
 
-## The idea
+## The problem
 
-"Is this fake?" is the wrong question, because no single detector is reliable enough to answer it. AI-image detectors break when the generator changes. Metadata can be stripped or forged. Text credibility is subjective. So instead of one overconfident classifier, this system runs **four weak-but-honest signals**, fuses them with renormalized weights, and reports a calibrated confidence with an uncertainty band. The output is an estimate, not a verdict.
+"Is this fake?" is the wrong question, because no single detector answers it reliably. Image detectors break when the generator changes. Metadata is trivially stripped or forged. Text credibility is subjective. So instead of one overconfident classifier, Holmes runs four weak-but-honest signals, fuses them with renormalized weights, and reports a calibrated confidence with an uncertainty band. The output is an estimate, not a verdict.
 
-## The four signals
+## How it decides
 
-Each signal returns an authenticity score in `[0, 1]` (0 = synthetic, 1 = authentic). Signals that are unavailable for a given request are dropped, and the remaining weights are renormalized so a missing signal never silently counts as evidence.
+Each signal returns an authenticity score in `[0, 1]` (0 = synthetic, 1 = authentic). Signals unavailable for a given request are dropped, and the remaining weights are renormalized, so a missing signal never silently counts as evidence.
 
-| Signal | Weight | Model / method | Honesty note |
-|--------|:------:|----------------|--------------|
-| **Text** | 45% | `microsoft/deberta-v3-base` fine-tuned on LIAR2, temperature-calibrated | Confidence reflects actual accuracy, not raw softmax overconfidence |
-| **Image** | 40% | `EfficientNet-B0` exported to ONNX | Reported with explicit false-positive rate; selected by validation AUC, not accuracy |
-| **Metadata** | 10% | Deterministic C2PA + EXIF parsing, no ML | Deliberately weak; metadata can be stripped or forged |
-| **Watermark** | 5% | Google SynthID interface | Currently unavailable on the free tier; wired but off |
+| Signal | Weight | Method | Why it is weighted this way |
+|--------|:------:|--------|-----------------------------|
+| Text | 45% | `microsoft/deberta-v3-base` fine-tuned on a credibility corpus, temperature-calibrated | Strongest signal; confidence reflects real accuracy, not raw softmax |
+| Image | 40% | `EfficientNet-B0` exported to ONNX | Reliable but generator-sensitive; reported with explicit false-positive rate |
+| Metadata | 10% | Deterministic C2PA + EXIF parsing, no ML | Useful nudge, but metadata can be stripped or forged |
+| Watermark | 5% | Google SynthID interface | Decisive when present, but unavailable on the free tier today |
 
-## Why this is more than a classifier
+## What sets it apart
 
-- **Calibration first.** The text model minimizes Expected Calibration Error via temperature scaling. When it says 70% it means it, instead of the inflated certainty raw softmax gives you.
-- **A baseline that must be beaten.** A TF-IDF + logistic regression model is trained as an anchor. The DeBERTa transformer ships only if it beats that baseline F1 on the same test set. No "the big model is obviously better" hand-waving.
-- **Graceful degradation.** Text-only request? The image and watermark signals drop out and weights renormalize. No signals at all? Confidence defaults to 0.5 (uncertain), not a fabricated answer.
+- **Calibrated, not confident.** The text model minimizes Expected Calibration Error via temperature scaling. When it says 70%, it means it.
+- **A baseline that must be beaten.** A TF-IDF and logistic-regression model is the anchor; the transformer ships only if it beats that baseline F1 on the same test set.
+- **Graceful degradation.** Text-only request? The image and watermark signals drop out and weights renormalize. No signals at all? Confidence defaults to 0.5, not a fabricated answer.
 - **No hard verdicts.** Confidence is clamped to `[0.01, 0.99]` and always paired with a band: `likely_authentic`, `uncertain`, or `likely_synthetic`.
-- **LLM as narrator, never as judge.** An optional local Ollama model narrates the numbers into prose. The code decides the band; the LLM is forbidden from inventing a verdict. If Ollama is unreachable, a deterministic template takes over.
+- **LLM as narrator, never judge.** An optional local model narrates the numbers into prose; the code decides the band. If the model is unreachable, a deterministic template takes over.
 
 ## Architecture
 
 ```
                  Request (text and/or image)
-                            │
-          ┌─────────────────┼─────────────────┐
-          ▼                 ▼                 ▼
-   ┌────────────┐    ┌────────────┐    ┌────────────┐    ┌────────────┐
-   │   Text     │    │   Image    │    │  Metadata  │    │  Watermark │
-   │ DeBERTa-v3 │    │ EffNet-B0  │    │ C2PA+EXIF  │    │  SynthID   │
-   │ calibrated │    │  (ONNX)    │    │determinist.│    │ (unavail.) │
-   └─────┬──────┘    └─────┬──────┘    └─────┬──────┘    └─────┬──────┘
-         └─────────────────┴───── weighted fusion ────────────┘
-                            │  (drop unavailable, renormalize)
-                            ▼
-                   confidence ∈ [0.01, 0.99]  →  band
-                            │
-                            ▼
-                 LLM narration (Ollama, optional)
-                            │
-                            ▼
-                      JSON response
+                            |
+          +-----------------+-----------------+
+          v                 v                 v
+   +------------+    +------------+    +------------+    +------------+
+   |   Text     |    |   Image    |    |  Metadata  |    |  Watermark |
+   | DeBERTa-v3 |    | EffNet-B0  |    | C2PA+EXIF  |    |  SynthID   |
+   | calibrated |    |  (ONNX)    |    | determ.    |    | (unavail.) |
+   +-----+------+    +-----+------+    +-----+------+    +-----+------+
+         +-----------------+----- weighted fusion ------------+
+                           |  (drop unavailable, renormalize)
+                           v
+                  confidence in [0.01, 0.99]  ->  band
+                           |
+                           v
+                LLM narration (optional, grounded)
+                           |
+                           v
+                     JSON response
 ```
 
 ## API
 
 | Method | Endpoint | Body | Returns |
 |--------|----------|------|---------|
-| `GET` | `/health` | — | `{"status": "ok"}` |
-| `POST` | `/predict/text` | `{"text": "..."}` | label + confidence |
-| `POST` | `/predict/image` | `{"image_base64": "..."}` | AI-generated probability + provenance |
-| `POST` | `/predict/fuse` | `{"text": "...", "image_base64": "..."}` | confidence, band, explanation, used signals, per-signal breakdown, disclaimer |
+| GET | `/health` | none | status |
+| POST | `/predict/text` | `{ "text": "..." }` | label + confidence |
+| POST | `/predict/image` | `{ "image_base64": "..." }` | AI-generated probability + provenance |
+| POST | `/predict/fuse` | `{ "text": "...", "image_base64": "..." }` | confidence, band, explanation, used signals, per-signal breakdown |
 
 Example fused response:
 
@@ -76,7 +76,7 @@ Example fused response:
   "band": "likely_synthetic",
   "explanation": "The text model leans uncredible and the image model sees AI artifacts...",
   "used_signals": ["text", "image", "metadata"],
-  "breakdown": {"text": 0.28, "image": 0.30, "metadata": 0.50},
+  "breakdown": { "text": 0.28, "image": 0.30, "metadata": 0.50 },
   "disclaimer": "This is an estimate, not an oracle."
 }
 ```
@@ -84,11 +84,11 @@ Example fused response:
 ## Quickstart
 
 ```bash
-python scripts/check_env.py            # GPU / environment check
+python scripts/check_env.py            # environment / GPU check
 
 # Data
-python -m src.data.prepare_text                  # downloads LIAR2 (~13k claims)
-python -m src.data.prepare_images /path/to/cifake
+python -m src.data.prepare_text        # downloads + maps the credibility corpus
+python -m src.data.prepare_images /path/to/image-dataset
 
 # Train
 python -m src.models.baseline_text     # TF-IDF anchor
@@ -106,58 +106,49 @@ uvicorn src.api.main:app --reload      # http://localhost:8000/docs
 pytest                                 # offline, CPU-friendly, models mocked
 ```
 
-## Datasets
+## Evaluation
 
-- **LIAR2** (text): ~13k news claims with six credibility labels, mapped to binary `credible` / `not_credible`. Downloaded via Hugging Face `datasets`. Seed 42 for reproducible splits.
-- **CIFAKE** (images): real-vs-AI images, supplied as a local `REAL/` `FAKE/` directory; the prep script builds a parquet manifest with deterministic train/val/test splits.
+Honest metrics, not headline numbers. Run the eval scripts on your trained artifacts to fill the table. False-positive rate is reported explicitly, because flagging a real photo as AI has a real cost.
 
-## Evaluation metrics
-
-The repo reports honest metrics, not headline numbers. Run the eval scripts to populate the table for your trained artifacts:
-
-| Metric | Where | Value |
-|--------|-------|-------|
+| Metric | Script | Value |
+|--------|--------|-------|
 | Text F1 (macro) | `eval_text.py` | run to fill |
 | Text ECE (calibration error) | `eval_text.py` | run to fill |
 | Image ROC-AUC | `eval_image.py` | run to fill |
 | Image false-positive rate | `eval_image.py` | run to fill |
 | Fusion band agreement | `eval_fusion.py` | run to fill |
 
-False-positive rate is reported explicitly because flagging a real photo as AI has a real cost.
-
 ## Deployment
 
-Container-first, designed for the AWS Lambda free tier (Mangum adapts FastAPI to the Lambda runtime). Large model artifacts live in S3 and are pulled to `/tmp` on cold start; models lazy-load only when their endpoint is hit. A least-privilege IAM policy (`infra/iam-policy.json`) grants read-only S3 on the artifact prefix plus CloudWatch logs. Full walkthrough in `infra/deploy_lambda.md`.
-
-Trade-off: free-tier cold starts add a few seconds on the first request. Upgrade path is provisioned concurrency or a small always-on instance.
+Container-first, built for the AWS Lambda free tier (Mangum adapts FastAPI to the Lambda runtime). Large artifacts live in S3 and are pulled to `/tmp` on cold start; models lazy-load only when their endpoint is hit. A least-privilege IAM policy grants read-only S3 on the artifact prefix plus CloudWatch logs. Full walkthrough in `infra/deploy_lambda.md`. Trade-off: free-tier cold starts add a few seconds on the first request.
 
 ## Project layout
 
 ```
-y1-provenance/
+.
 ├── src/
 │   ├── config.py            # single source of truth: paths, weights, thresholds
 │   ├── models/              # text_classifier, baseline_text, image_detector,
 │   │                        # metadata_provenance, synthid_client, fusion
 │   ├── api/                 # main (FastAPI), schemas (Pydantic), handler (Lambda)
-│   ├── data/                # prepare_text (LIAR2), prepare_images (CIFAKE)
+│   ├── data/                # text + image dataset preparation
 │   └── eval/                # eval_text, eval_image, eval_fusion, results_table
 ├── tests/                   # api, calibration, fusion, metadata, data
-├── ui/index.html            # dashboard: SVG confidence dial + per-signal bars
+├── ui/index.html            # dashboard: confidence dial + per-signal bars
 ├── infra/                   # deploy_lambda.md, iam-policy.json
 ├── .github/workflows/ci.yml # lint (ruff) + test (pytest) + docker build
 ├── Dockerfile               # Lambda-compatible image
 └── pyproject.toml
 ```
 
-## Honest limitations
+## Limitations
 
-- AI-image detection degrades when the generator distribution shifts; the explicit FPR is there to remind you of that.
-- LIAR2 labels are credibility annotations, not ground truth of falsehood.
+- Image detection degrades when the generator distribution shifts; the explicit FPR is there to keep that visible.
+- The credibility labels are annotations, not ground truth of falsehood.
 - SynthID is unavailable on the free tier, so the watermark signal is wired but inert.
-- Metadata is forgeable, which is exactly why it carries only 10% weight.
-- Lambda free tier means cold-start latency.
+- Metadata is forgeable, which is exactly why it carries only 10% of the weight.
+- Lambda free tier means cold-start latency on the first request.
 
----
+## License
 
-The thesis of this project: a detector that admits uncertainty and renormalizes around missing evidence is more useful than a confident classifier that is wrong 30% of the time and never says so.
+MIT.

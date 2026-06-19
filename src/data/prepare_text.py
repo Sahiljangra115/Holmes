@@ -13,9 +13,6 @@ import pandas as pd
 
 from src.config import CFG
 
-# The LIAR2 statement text lives in the "statement" column and the 6-way label
-# in "label". Other columns (speaker, context, justification) are kept for
-# optional richer experiments but are not required by the baseline.
 TEXT_COL = "statement"
 LABEL_COL = "label"
 
@@ -25,7 +22,6 @@ def _to_frame(split) -> pd.DataFrame:
     df = df[[TEXT_COL, LABEL_COL]].copy()
     df = df.dropna(subset=[TEXT_COL, LABEL_COL])
     df = df[df[TEXT_COL].str.strip().astype(bool)]
-    # Collapse 6-way to binary using the documented mapping in config.
     df["label"] = df[LABEL_COL].map(CFG.liar2_to_binary).astype("int64")
     df["text"] = df[TEXT_COL].str.strip()
     return df[["text", "label"]].reset_index(drop=True)

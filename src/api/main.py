@@ -52,8 +52,6 @@ def predict_image(req: ImageRequest):
 
     img = _decode_image(req.image_base64)
     out = predict(img)
-    # Metadata wants a path or file; write to a temp buffer is overkill here, so
-    # we pass an empty provenance when only base64 is available.
     return ImageResponse(ai_generated_prob=out["ai_generated_prob"], provenance={})
 
 
